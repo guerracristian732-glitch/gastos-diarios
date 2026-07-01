@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Gastos Diarios</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        :root{
+            --bg:#f5f6f8;
+            --panel:#ffffff;
+            --border:#dfe2e7;
+            --text:#1f2430;
+            --muted:#6b7280;
+            --accent:#2f4a68;
+            --accent-hover:#25394f;
+            --danger:#b3261e;
+            --danger-bg:#fdecea;
+            --danger-hover:#8f1f19;
+        }
+        *{box-sizing:border-box;}
+        body{
+            margin:0;
+            background:var(--bg);
+            color:var(--text);
+            font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,sans-serif;
+        }
+        input{font-size:16px !important;}
+        @media (min-width: 640px){ input{font-size:14px !important;} }
+        button{font-family:inherit;cursor:pointer;}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function GastosApp() {
+            const hoy = new Date().toISOString().slice(0,10);
+
+            const [cargandoSesion, setCargandoSesion] = useState(true);
+            const [isAdmin, setIsAdmin]                 = useState(false);
+            const [usuarioNombre, setUsuarioNombre]     = useState('Usuario');
+
+            const [reportes, setReportes]               = useState([]);
+            const [filasNuevas, setFilasNuevas]         = useState([{ id: Date.now(), nombre_reporte: '', producto: '', cantidad: '', precio: '', fecha: hoy }]);
+            const [guardando, setGuardando]             = useState(false);
+            const [filtroFechaInicio, setFiltroFechaInicio] = useState('');
+            const [filtroFechaFin, setFiltroFechaFin]   = useState('');
+            const [menuAbierto, setMenuAbierto]         = useState(false);
+            const [vistaMovil, setVistaMovil]           = useState('inicio');
+            const [editando, setEditando]               = useState(null);
+            const [edicion, setEdicion]                 = useState({ nombre_reporte: '', producto: '', cantidad: '', precio: '', fecha: '' });
+
+            useEffect(() => {
+                fetch('/api/me').then(async (res) => {
+                    if (!res.ok) { window.location.href = '/login.html'; return; }
+                    const data = await res.json();
+                    setIsAdmin(data.isAdmin);
+                    setUsuarioNombre(data.nombre);
+                    setCargandoSesion(false);
+                    cargarReportes();
+                });
+            }, []);
+
+            const cargarReportes = async (fechaInicio = '', fechaFin = '') => {
+                try {
+                    let url = `/api/reportes`;
+                    if (fechaInicio && fechaFin) url += `?fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+                    const res  = await fetch(url);
+                    const data = await res.json();
+                    if (data.success) setReportes(data.reportes.map(r => ({
+                        ...r,
+                        id:       parseInt(r.id),
+                        cantidad: parseInt(r.cantidad),
+                        precio:   parseFloat(r.precio),
+                        monto:    parseFloat(r.monto)
+                    })));
+                } catch(e) { console.error(e); }
+            };
+
+            const eliminarReporte = async (id) => {
+                if (!confirm('¿Eliminar este registro?')) return;
+                try {
+                    await fetch(`/api/reportes/${id}`, { method: 'DELETE' });
+                    cargarReportes(filtroFechaInicio, filtroFechaFin);
+                } catch(e) { console.error(e); }
+            };
+
+            const eliminarDia = async (fecha, items) => {
+                if (!confirm(`¿Eliminar todos los registros del ${fecha}?`)) return;
+                try {
+                    for (const r of items) {
+                        await fetch(`/api/reportes/${r.id}`, { method: 'DELETE' });
+                    }
+                    cargarReportes(filtroFechaInicio, filtroFechaFin);
+                } catch(e) { console.error(e); }
+            };
+
+            const iniciarEdicion = (r) => {
+                setEditando(r.id);
+                setEdicion({ nombre_reporte: r.nombre_reporte || '', producto: r.producto, cantidad: r.cantidad, precio: r.precio, fecha: r.fecha_creacion.slice(0,10) });
+            };
+
+            const cancelarEdicion = () => {
+                setEditando(null);
+                setEdicion({ nombre_reporte: '', producto: '', cantidad: '', precio: '', fecha: '' });
+            };
+
+            const actualizarReporte = async (id) => {
+                if (!edicion.producto || !edicion.cantidad || !edicion.precio) {
+                    alert('Completa todos los campos');
+                    return;
+                }
+                try {
+                    await fetch(`/api/reportes/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            nombre_reporte: edicion.nombre_reporte,
+                            producto: edicion.producto,
+                            cantidad: parseInt(edicion.cantidad),
+                            precio: parseFloat(edicion.precio),
+                            fecha: edicion.fecha
+                        })
+                    });
+                    cancelarEdicion();
+                    cargarReportes(filtroFechaInicio, filtroFechaFin);
+                } catch(e) { console.error(e); }
+            };
+
+            const actualizarFila = (id, campo, valor) =>
+                setFilasNuevas(prev => prev.map(f => f.id === id ? { ...f, [campo]: valor } : f));
+
+            const agregarFila = () =>
+                setFilasNuevas(prev => [...prev, { id: Date.now(), nombre_reporte: '', producto: '', cantidad: '', precio: '', fecha: hoy }]);
+
+            const eliminarFila = (id) => {
+                if (filasNuevas.length === 1) return;
+                setFilasNuevas(prev => prev.filter(f => f.id !== id));
+            };
+
+            const guardarTodo = async () => {
+                const validas = filasNuevas.filter(f => f.producto && f.cantidad && f.precio);
+                if (validas.length === 0) { alert('Completa al menos una fila'); return; }
+                setGuardando(true);
+                try {
+                    for (const fila of validas) {
+                        await fetch(`/api/reportes`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ nombre_reporte: fila.nombre_reporte, producto: fila.producto, cantidad: parseInt(fila.cantidad), precio: parseFloat(fila.precio), fecha: fila.fecha || hoy })
+                        });
+                    }
+                    setFilasNuevas([{ id: Date.now(), nombre_reporte: '', producto: '', cantidad: '', precio: '', fecha: hoy }]);
+                    cargarReportes(filtroFechaInicio, filtroFechaFin);
+                    setVistaMovil('reportes');
+                } catch(e) { console.error(e); }
+                setGuardando(false);
+            };
+
+            const aplicarFiltro = () => {
+                if (filtroFechaInicio && filtroFechaFin) cargarReportes(filtroFechaInicio, filtroFechaFin);
+                else alert('Completa ambas fechas');
+            };
+
+            const limpiarFiltro = () => {
+                setFiltroFechaInicio(''); setFiltroFechaFin('');
+                cargarReportes();
+            };
+
+            const cerrarSesion = async () => {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login.html';
+            };
+
+            const descargarPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: 'landscape' });
+                const montoTotalPDF = reportes.reduce((s, r) => s + r.monto, 0);
+                const fecha = new Date().toLocaleString('es-PE');
+                const rango = (filtroFechaInicio && filtroFechaFin)
+                    ? `${filtroFechaInicio} al ${filtroFechaFin}` : 'Todos los registros';
+
+                doc.setFontSize(16); doc.setTextColor(31, 36, 48);
+                doc.text('Gastos Diarios - Reporte', 148, 18, { align: 'center' });
+                doc.setFontSize(9); doc.setTextColor(107, 114, 128);
+                doc.text(`Generado: ${fecha}   |   Periodo: ${rango}   |   Registros: ${reportes.length}`, 148, 25, { align: 'center' });
+
+                const filas = [...reportes].reverse().map((r, i) => [
+                    i + 1, r.nombre_reporte || '-', r.producto, r.cantidad,
+                    `S/ ${r.precio.toFixed(2)}`,
+                    `S/ ${r.monto.toFixed(2)}`,
+                    new Date(r.fecha_creacion).toLocaleString('es-PE')
+                ]);
+
+                doc.autoTable({
+                    startY: 32,
+                    head: [['#', 'Nombre reporte', 'Producto', 'Cantidad', 'Precio Unit.', 'Monto', 'Fecha']],
+                    body: filas,
+                    headStyles: { fillColor: [47, 74, 104], textColor: 255 },
+                    alternateRowStyles: { fillColor: [245, 246, 248] },
+                    styles: { fontSize: 9 }
+                });
+
+                const finalY = doc.lastAutoTable.finalY + 10;
+                doc.setFontSize(12); doc.setTextColor(31, 36, 48);
+                doc.text(`Monto Total: S/ ${montoTotalPDF.toFixed(2)}`, 20, finalY);
+                doc.save(`gastos_${new Date().toISOString().slice(0,10)}.pdf`);
+            };
+
+            const descargarPDFDia = (fecha, items, totalDia) => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: 'landscape' });
+                const fechaFormateada = new Date(fecha + 'T12:00:00').toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+                doc.setFontSize(16); doc.setTextColor(31, 36, 48);
+                doc.text('Gastos Diarios - Reporte', 148, 18, { align: 'center' });
+                doc.setFontSize(9); doc.setTextColor(107, 114, 128);
+                doc.text(`Fecha: ${fechaFormateada}   |   Registros: ${items.length}`, 148, 25, { align: 'center' });
+
+                const filas = items.map((r, i) => [
+                    i + 1, r.nombre_reporte || '-', r.producto, r.cantidad,
+                    `S/ ${r.precio.toFixed(2)}`,
+                    `S/ ${r.monto.toFixed(2)}`
+                ]);
+
+                doc.autoTable({
+                    startY: 32,
+                    head: [['#', 'Nombre reporte', 'Producto', 'Cantidad', 'Precio Unit.', 'Monto']],
+                    body: filas,
+                    headStyles: { fillColor: [47, 74, 104], textColor: 255 },
+                    alternateRowStyles: { fillColor: [245, 246, 248] },
+                    styles: { fontSize: 9 }
+                });
+
+                const finalY = doc.lastAutoTable.finalY + 10;
+                doc.setFontSize(12); doc.setTextColor(31, 36, 48);
+                doc.text(`Monto Total: S/ ${totalDia.toFixed(2)}`, 20, finalY);
+                doc.save(`gastos_${fecha}.pdf`);
+            };
+
+            if (cargandoSesion) {
+                return (
+                    <div style={{minHeight:'100vh',background:'#f5f6f8',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                        <p style={{color:'#6b7280',fontSize:14}}>Cargando…</p>
+                    </div>
+                );
+            }
+
+            const montoTotalFormulario = filasNuevas.reduce((s, f) => s + ((parseInt(f.cantidad)||0) * (parseFloat(f.precio)||0)), 0);
+            const montoTotalGeneral    = reportes.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
+
+            const S = {
+                page: { minHeight:'100vh', background:'#f5f6f8' },
+                nav: { background:'#fff', borderBottom:'1px solid #dfe2e7', position:'sticky', top:0, zIndex:50 },
+                navInner: { maxWidth:960, margin:'0 auto', padding:'0 16px', display:'flex', justifyContent:'space-between', alignItems:'center', height:60 },
+                navLeft: { display:'flex', alignItems:'center', gap:12 },
+                logo: { width:40, height:40, borderRadius:4, objectFit:'cover', background:'#eef0f3', border:'1px solid #dfe2e7' },
+                navTitle: { fontSize:15, fontWeight:700, margin:0, letterSpacing:'0.2px' },
+                navSub: { fontSize:12, color:'#6b7280', margin:0 },
+                btnGhost: { background:'#fff', border:'1px solid #dfe2e7', color:'#1f2430', fontSize:13, fontWeight:600, padding:'8px 14px', borderRadius:4 },
+                btnDanger: { background:'#fff', border:'1px solid #dfe2e7', color:'var(--danger)', fontSize:13, fontWeight:600, padding:'8px 14px', borderRadius:4 },
+                container: { maxWidth:960, margin:'0 auto', padding:'20px 16px' },
+                summaryCard: { background:'#fff', border:'1px solid #dfe2e7', borderRadius:6, padding:'20px 24px', marginBottom:20, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 },
+                panel: { background:'#fff', border:'1px solid #dfe2e7', borderRadius:6, padding:20, marginBottom:20 },
+                panelTitle: { fontSize:14, fontWeight:700, margin:'0 0 16px 0', color:'#1f2430' },
+                input: { width:'100%', border:'1px solid #dfe2e7', borderRadius:4, padding:'8px 10px', background:'#fff', color:'#1f2430' },
+                label: { display:'block', fontSize:12, color:'#6b7280', marginBottom:4, fontWeight:600 },
+                th: { textAlign:'left', padding:'8px 10px', fontSize:12, color:'#6b7280', fontWeight:700, borderBottom:'1px solid #dfe2e7' },
+                td: { padding:'10px', fontSize:13, borderBottom:'1px solid #eef0f3' },
+                btnPrimary: { background:'#2f4a68', color:'#fff', border:'none', borderRadius:4, padding:'10px 16px', fontWeight:600, fontSize:13 },
+                btnSecondary: { background:'#fff', color:'#1f2430', border:'1px solid #dfe2e7', borderRadius:4, padding:'10px 16px', fontWeight:600, fontSize:13 },
+            };
+
+            return (
+                <div style={S.page}>
+                    <nav style={S.nav}>
+                        <div style={S.navInner}>
+                            <div style={S.navLeft}>
+                                <img src="img/logo_navbar.png" alt="Logo" style={S.logo} />
+                                <div>
+                                    <p style={S.navTitle}>Gastos Diarios</p>
+                                    <p style={S.navSub}>{usuarioNombre}</p>
+                                </div>
+                            </div>
+                            <div className="hidden sm:flex" style={{display: window.innerWidth < 640 ? 'none' : 'flex', gap:8}}>
+                                {isAdmin && <a href="admin.html" style={{...S.btnGhost, textDecoration:'none', display:'inline-block'}}>Administración</a>}
+                                <button onClick={cerrarSesion} style={S.btnDanger}>Cerrar sesión</button>
+                            </div>
+                            <button style={{...S.btnGhost, display: window.innerWidth < 640 ? 'inline-block' : 'none'}} onClick={() => setMenuAbierto(!menuAbierto)}>
+                                {menuAbierto ? 'Cerrar' : 'Menú'}
+                            </button>
+                        </div>
+                        {menuAbierto && (
+                            <div style={{borderTop:'1px solid #dfe2e7', padding:12, display:'flex', flexDirection:'column', gap:8}}>
+                                {isAdmin && <a href="admin.html" style={{...S.btnGhost, textAlign:'center', textDecoration:'none'}}>Administración</a>}
+                                <button onClick={cerrarSesion} style={S.btnDanger}>Cerrar sesión</button>
+                            </div>
+                        )}
+                    </nav>
+
+                    <div style={{display:'flex', borderBottom:'1px solid #dfe2e7', background:'#fff'}} className="tabs-movil">
+                        {[{id:'inicio',label:'Inicio'},{id:'agregar',label:'Agregar'},{id:'reportes',label:`Registros (${reportes.length})`}].map(tab => (
+                            <button key={tab.id} onClick={() => setVistaMovil(tab.id)}
+                                style={{
+                                    flex:1, padding:'10px 4px', fontSize:12, fontWeight:600, border:'none', background:'transparent',
+                                    color: vistaMovil===tab.id ? '#2f4a68' : '#6b7280',
+                                    borderBottom: vistaMovil===tab.id ? '2px solid #2f4a68' : '2px solid transparent'
+                                }}>
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div style={S.container}>
+
+                        <div className="vista-inicio" style={{display: vistaMovil==='inicio' ? 'block' : ''}}>
+                            <div style={S.summaryCard}>
+                                <div>
+                                    <p style={{fontSize:12, color:'#6b7280', margin:'0 0 4px 0', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px'}}>Monto total</p>
+                                    <p style={{fontSize:30, fontWeight:700, margin:0, color:'#1f2430'}}>S/ {montoTotalGeneral.toFixed(2)}</p>
+                                </div>
+                                <div style={{textAlign:'right'}}>
+                                    <p style={{fontSize:12, color:'#6b7280', margin:'0 0 4px 0', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.4px'}}>Registros</p>
+                                    <p style={{fontSize:20, fontWeight:700, margin:0, color:'#1f2430'}}>{reportes.length}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="vista-agregar">
+                            <div style={S.panel}>
+                                <h2 style={S.panelTitle}>Agregar registro</h2>
+
+                                <div className="filas-movil">
+                                    {filasNuevas.map((fila) => {
+                                        const monto = (parseInt(fila.cantidad)||0) * (parseFloat(fila.precio)||0);
+                                        return (
+                                            <div key={fila.id} style={{border:'1px solid #dfe2e7', borderRadius:4, padding:12, marginBottom:10}}>
+                                                <div style={{display:'flex', justifyContent:'space-between', marginBottom:8}}>
+                                                    <span style={{fontSize:11, color:'#6b7280', fontWeight:700}}>PRODUCTO</span>
+                                                    {filasNuevas.length > 1 && <button onClick={() => eliminarFila(fila.id)} style={{background:'none', border:'none', color:'var(--danger)', fontSize:12, fontWeight:600}}>Quitar</button>}
+                                                </div>
+                                                <label style={S.label}>Nombre del reporte</label>
+                                                <input type="text" value={fila.nombre_reporte} onChange={(e) => actualizarFila(fila.id,'nombre_reporte',e.target.value)} style={{...S.input, marginBottom:8}} placeholder="Ej: Compras del mercado" />
+                                                <input type="text" value={fila.producto} onChange={(e) => actualizarFila(fila.id,'producto',e.target.value)} style={{...S.input, marginBottom:8}} placeholder="Descripción" />
+                                                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8}}>
+                                                    <div>
+                                                        <label style={S.label}>Cantidad</label>
+                                                        <input type="number" value={fila.cantidad} onChange={(e) => actualizarFila(fila.id,'cantidad',e.target.value)} style={S.input} placeholder="0" />
+                                                    </div>
+                                                    <div>
+                                                        <label style={S.label}>Precio unit.</label>
+                                                        <input type="number" value={fila.precio} onChange={(e) => actualizarFila(fila.id,'precio',e.target.value)} style={S.input} placeholder="0.00" />
+                                                    </div>
+                                                </div>
+                                                <label style={S.label}>Fecha</label>
+                                                <input type="date" value={fila.fecha} onChange={(e) => actualizarFila(fila.id,'fecha',e.target.value)} style={S.input} />
+                                                <div style={{textAlign:'right', marginTop:8, fontSize:13, fontWeight:700, color:'#2f4a68'}}>
+                                                    Monto: S/ {monto.toFixed(2)}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="tabla-desktop" style={{overflowX:'auto'}}>
+                                    <table style={{width:'100%', borderCollapse:'collapse'}}>
+                                        <thead>
+                                            <tr>
+                                                <th style={{...S.th, width:150}}>Nombre reporte</th>
+                                                <th style={S.th}>Producto</th>
+                                                <th style={{...S.th, width:100}}>Cantidad</th>
+                                                <th style={{...S.th, width:110}}>Precio unit.</th>
+                                                <th style={{...S.th, width:100}}>Monto</th>
+                                                <th style={{...S.th, width:150}}>Fecha</th>
+                                                <th style={{...S.th, width:50, textAlign:'center'}}></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filasNuevas.map((fila) => {
+                                                const monto = (parseInt(fila.cantidad)||0) * (parseFloat(fila.precio)||0);
+                                                return (
+                                                    <tr key={fila.id}>
+                                                        <td style={S.td}><input type="text" value={fila.nombre_reporte} onChange={(e) => actualizarFila(fila.id,'nombre_reporte',e.target.value)} style={S.input} placeholder="Ej: Compras" /></td>
+                                                        <td style={S.td}><input type="text" value={fila.producto} onChange={(e) => actualizarFila(fila.id,'producto',e.target.value)} style={S.input} placeholder="Descripción" /></td>
+                                                        <td style={S.td}><input type="number" value={fila.cantidad} onChange={(e) => actualizarFila(fila.id,'cantidad',e.target.value)} style={S.input} placeholder="0" /></td>
+                                                        <td style={S.td}><input type="number" value={fila.precio} onChange={(e) => actualizarFila(fila.id,'precio',e.target.value)} style={S.input} placeholder="0.00" /></td>
+                                                        <td style={{...S.td, fontWeight:700, color:'#2f4a68'}}>S/ {monto.toFixed(2)}</td>
+                                                        <td style={S.td}><input type="date" value={fila.fecha} onChange={(e) => actualizarFila(fila.id,'fecha',e.target.value)} style={S.input} /></td>
+                                                        <td style={{...S.td, textAlign:'center'}}><button onClick={() => eliminarFila(fila.id)} style={{background:'none', border:'none', color:'var(--danger)', fontWeight:700, fontSize:15}}>×</button></td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div style={{marginTop:14, background:'#f5f6f8', border:'1px solid #dfe2e7', borderRadius:4, padding:'10px 14px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                                    <span style={{fontSize:13, fontWeight:600, color:'#374151'}}>Monto total</span>
+                                    <span style={{fontSize:17, fontWeight:700, color:'#2f4a68'}}>S/ {montoTotalFormulario.toFixed(2)}</span>
+                                </div>
+
+                                <div style={{display:'flex', gap:8, marginTop:14, flexWrap:'wrap'}}>
+                                    <button onClick={guardarTodo} disabled={guardando} style={{...S.btnPrimary, flex:1, minWidth:140, opacity: guardando ? 0.6 : 1}}>
+                                        {guardando ? 'Guardando…' : 'Guardar registros'}
+                                    </button>
+                                    <button onClick={agregarFila} style={{...S.btnSecondary, flex:1, minWidth:140}}>
+                                        Agregar fila
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="vista-reportes">
+
+                            <div style={S.panel}>
+                                <h2 style={S.panelTitle}>Filtrar por fecha</h2>
+                                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
+                                    <div>
+                                        <label style={S.label}>Desde</label>
+                                        <input type="date" value={filtroFechaInicio} onChange={(e) => setFiltroFechaInicio(e.target.value)} style={S.input} />
+                                    </div>
+                                    <div>
+                                        <label style={S.label}>Hasta</label>
+                                        <input type="date" value={filtroFechaFin} onChange={(e) => setFiltroFechaFin(e.target.value)} style={S.input} />
+                                    </div>
+                                </div>
+                                <div style={{display:'flex', gap:8, marginTop:10, flexWrap:'wrap'}}>
+                                    <button onClick={aplicarFiltro} style={{...S.btnPrimary, flex:1, minWidth:100}}>Filtrar</button>
+                                    <button onClick={limpiarFiltro} style={{...S.btnSecondary, flex:1, minWidth:100}}>Limpiar</button>
+                                    <button onClick={descargarPDF} style={{...S.btnSecondary, flex:1, minWidth:140}}>Descargar PDF</button>
+                                </div>
+                            </div>
+
+                            {reportes.length > 0 ? (() => {
+                                const grupos = {};
+                                reportes.forEach(r => {
+                                    const fecha = r.fecha_creacion.slice(0, 10);
+                                    if (!grupos[fecha]) grupos[fecha] = [];
+                                    grupos[fecha].push(r);
+                                });
+                                const fechasOrdenadas = Object.keys(grupos).sort((a, b) => b.localeCompare(a));
+
+                                return fechasOrdenadas.map(fecha => {
+                                    const items = grupos[fecha];
+                                    const totalDia = items.reduce((s, r) => s + r.monto, 0);
+                                    const fechaFormateada = new Date(fecha + 'T12:00:00').toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+                                    return (
+                                        <div key={fecha} style={{...S.panel, padding:0, overflow:'hidden'}}>
+                                            <div style={{padding:'12px 16px', borderBottom:'1px solid #dfe2e7', background:'#f9fafb', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8}}>
+                                                <span style={{fontWeight:700, fontSize:13, textTransform:'capitalize'}}>{fechaFormateada}</span>
+                                                <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                                                    <span style={{fontSize:13, fontWeight:700, color:'#2f4a68'}}>S/ {totalDia.toFixed(2)}</span>
+                                                    <button onClick={() => descargarPDFDia(fecha, items, totalDia)} style={{...S.btnSecondary, padding:'5px 10px', fontSize:12}}>PDF</button>
+                                                    <button onClick={() => eliminarDia(fechaFormateada, items)} style={{...S.btnDanger, padding:'5px 10px', fontSize:12}}>Eliminar día</button>
+                                                </div>
+                                            </div>
+
+                                            <div className="filas-movil" style={{padding:8}}>
+                                                {items.map(r => (
+                                                    editando === r.id ? (
+                                                        <div key={r.id} style={{border:'1px solid #2f4a68', borderRadius:4, padding:10, marginBottom:8}}>
+                                                            <input type="text" value={edicion.nombre_reporte} onChange={(e) => setEdicion({...edicion, nombre_reporte: e.target.value})} style={{...S.input, marginBottom:6}} placeholder="Nombre del reporte" />
+                                                            <input type="text" value={edicion.producto} onChange={(e) => setEdicion({...edicion, producto: e.target.value})} style={{...S.input, marginBottom:6}} placeholder="Producto" />
+                                                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:6}}>
+                                                                <input type="number" value={edicion.cantidad} onChange={(e) => setEdicion({...edicion, cantidad: e.target.value})} style={S.input} placeholder="Cantidad" />
+                                                                <input type="number" value={edicion.precio} onChange={(e) => setEdicion({...edicion, precio: e.target.value})} style={S.input} placeholder="Precio" />
+                                                            </div>
+                                                            <input type="date" value={edicion.fecha} onChange={(e) => setEdicion({...edicion, fecha: e.target.value})} style={{...S.input, marginBottom:8}} />
+                                                            <div style={{display:'flex', gap:8}}>
+                                                                <button onClick={() => actualizarReporte(r.id)} style={{...S.btnPrimary, flex:1}}>Actualizar</button>
+                                                                <button onClick={cancelarEdicion} style={{...S.btnSecondary, flex:1}}>Cancelar</button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div key={r.id} style={{border:'1px solid #eef0f3', borderRadius:4, padding:10, marginBottom:8}}>
+                                                            <div style={{display:'flex', justifyContent:'space-between', marginBottom:4}}>
+                                                                <div>
+                                                                    {r.nombre_reporte && <div style={{fontSize:11, color:'#6b7280', fontWeight:600, marginBottom:2}}>{r.nombre_reporte}</div>}
+                                                                    <span style={{fontWeight:700, fontSize:13}}>{r.producto}</span>
+                                                                </div>
+                                                                <div style={{display:'flex', gap:10}}>
+                                                                    <button onClick={() => iniciarEdicion(r)} style={{background:'none', border:'none', color:'#2f4a68', fontSize:12, fontWeight:600}}>Editar</button>
+                                                                    <button onClick={() => eliminarReporte(r.id)} style={{background:'none', border:'none', color:'var(--danger)', fontSize:12, fontWeight:600}}>Eliminar</button>
+                                                                </div>
+                                                            </div>
+                                                            <div style={{fontSize:12, color:'#6b7280'}}>
+                                                                Cant: {r.cantidad} &nbsp;·&nbsp; P/u: S/{r.precio.toFixed(2)} &nbsp;·&nbsp; <span style={{color:'#2f4a68', fontWeight:700}}>S/{r.monto.toFixed(2)}</span>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                ))}
+                                            </div>
+
+                                            <div className="tabla-desktop" style={{overflowX:'auto'}}>
+                                                <table style={{width:'100%', borderCollapse:'collapse'}}>
+                                                    <thead>
+                                                        <tr>
+                                                            <th style={S.th}>Nombre reporte</th>
+                                                            <th style={S.th}>Producto</th>
+                                                            <th style={S.th}>Cantidad</th>
+                                                            <th style={S.th}>Precio</th>
+                                                            <th style={{...S.th, textAlign:'right'}}>Monto</th>
+                                                            <th style={{...S.th, textAlign:'center', width:150}}>Acciones</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {items.map(r => (
+                                                            editando === r.id ? (
+                                                                <tr key={r.id} style={{background:'#f5f6f8'}}>
+                                                                    <td style={S.td}><input type="text" value={edicion.nombre_reporte} onChange={(e) => setEdicion({...edicion, nombre_reporte: e.target.value})} style={S.input} /></td>
+                                                                    <td style={S.td}><input type="text" value={edicion.producto} onChange={(e) => setEdicion({...edicion, producto: e.target.value})} style={S.input} /></td>
+                                                                    <td style={S.td}><input type="number" value={edicion.cantidad} onChange={(e) => setEdicion({...edicion, cantidad: e.target.value})} style={S.input} /></td>
+                                                                    <td style={S.td}><input type="number" value={edicion.precio} onChange={(e) => setEdicion({...edicion, precio: e.target.value})} style={S.input} /></td>
+                                                                    <td style={S.td}><input type="date" value={edicion.fecha} onChange={(e) => setEdicion({...edicion, fecha: e.target.value})} style={S.input} /></td>
+                                                                    <td style={{...S.td, textAlign:'center'}}>
+                                                                        <div style={{display:'flex', gap:6, justifyContent:'center'}}>
+                                                                            <button onClick={() => actualizarReporte(r.id)} style={{...S.btnPrimary, padding:'5px 10px', fontSize:12}}>Guardar</button>
+                                                                            <button onClick={cancelarEdicion} style={{...S.btnSecondary, padding:'5px 10px', fontSize:12}}>Cancelar</button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            ) : (
+                                                                <tr key={r.id}>
+                                                                    <td style={S.td}>{r.nombre_reporte || '—'}</td>
+                                                                    <td style={S.td}>{r.producto}</td>
+                                                                    <td style={S.td}>{r.cantidad}</td>
+                                                                    <td style={S.td}>S/ {r.precio.toFixed(2)}</td>
+                                                                    <td style={{...S.td, textAlign:'right', fontWeight:600, color:'#2f4a68'}}>S/ {r.monto.toFixed(2)}</td>
+                                                                    <td style={{...S.td, textAlign:'center'}}>
+                                                                        <div style={{display:'flex', gap:12, justifyContent:'center'}}>
+                                                                            <button onClick={() => iniciarEdicion(r)} style={{background:'none', border:'none', color:'#2f4a68', fontWeight:600, fontSize:12}}>Editar</button>
+                                                                            <button onClick={() => eliminarReporte(r.id)} style={{background:'none', border:'none', color:'var(--danger)', fontWeight:600, fontSize:12}}>Eliminar</button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            )
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <div style={{borderTop:'1px solid #dfe2e7', background:'#f9fafb', padding:'10px 16px', textAlign:'center'}}>
+                                                <span style={{fontSize:11, color:'#6b7280'}}>Total del día: </span>
+                                                <span style={{fontSize:14, fontWeight:700, color:'#2f4a68'}}>S/ {totalDia.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                });
+                            })() : (
+                                <div style={{...S.panel, textAlign:'center', color:'#6b7280', fontSize:13}}>
+                                    No hay registros todavía. Agrega uno para comenzar.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <style>{`
+                        @media (max-width: 639px) {
+                            .vista-inicio { display: ${vistaMovil === 'inicio' ? 'block' : 'none'} !important; }
+                            .vista-agregar { display: ${vistaMovil === 'agregar' ? 'block' : 'none'} !important; }
+                            .vista-reportes { display: ${vistaMovil === 'reportes' ? 'block' : 'none'} !important; }
+                            .tabla-desktop { display: none !important; }
+                        }
+                        @media (min-width: 640px) {
+                            .tabs-movil { display: none !important; }
+                            .vista-inicio, .vista-agregar, .vista-reportes { display: block !important; }
+                            .filas-movil { display: none !important; }
+                        }
+                    `}</style>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<GastosApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

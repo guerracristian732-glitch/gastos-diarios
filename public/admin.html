@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Administración — Gastos Diarios</title>
+    <style>
+        :root{
+            --bg:#f5f6f8;
+            --panel:#ffffff;
+            --border:#dfe2e7;
+            --text:#1f2430;
+            --muted:#6b7280;
+            --accent:#2f4a68;
+            --accent-hover:#25394f;
+            --danger:#b3261e;
+            --danger-hover:#8f1f19;
+            --danger-bg:#fdecea;
+            --success:#1e6b3c;
+            --success-bg:#e9f7ee;
+        }
+        *{box-sizing:border-box;}
+        body{
+            margin:0;
+            background:var(--bg);
+            color:var(--text);
+            font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,sans-serif;
+        }
+        input{font-size:16px !important;}
+        @media (min-width:640px){ input{font-size:14px !important;} }
+        nav{
+            background:#fff;
+            border-bottom:1px solid var(--border);
+            position:sticky;
+            top:0;
+            z-index:50;
+        }
+        .nav-inner{
+            max-width:960px;
+            margin:0 auto;
+            padding:0 16px;
+            height:60px;
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+        }
+        .nav-title{font-size:15px;font-weight:700;margin:0;}
+        .nav-sub{font-size:12px;color:var(--muted);margin:0;}
+        .btn{
+            border-radius:4px;
+            padding:8px 14px;
+            font-size:13px;
+            font-weight:600;
+            border:1px solid var(--border);
+            background:#fff;
+            color:var(--text);
+            cursor:pointer;
+            text-decoration:none;
+            display:inline-block;
+        }
+        .btn-primary{ background:var(--accent); color:#fff; border-color:var(--accent); width:100%; padding:10px; }
+        .btn-primary:hover{ background:var(--accent-hover); }
+        .btn-danger{ color:var(--danger); }
+        .btn-danger:hover{ background:var(--danger-bg); }
+        .container{max-width:960px;margin:0 auto;padding:20px 16px;}
+        .grid{display:grid;grid-template-columns:1fr;gap:16px;}
+        @media (min-width:1024px){ .grid{grid-template-columns:320px 1fr;} }
+        .panel{
+            background:#fff;
+            border:1px solid var(--border);
+            border-radius:6px;
+            padding:20px;
+        }
+        .panel h2{font-size:14px;font-weight:700;margin:0 0 16px 0;}
+        label{display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px;}
+        .field{margin-bottom:12px;}
+        input{
+            width:100%;
+            border:1px solid var(--border);
+            border-radius:4px;
+            padding:9px 10px;
+            background:#fff;
+            color:var(--text);
+        }
+        input:focus{outline:none;border-color:var(--accent);}
+        .hint{font-size:11px;color:var(--muted);margin-top:3px;}
+        table{width:100%;border-collapse:collapse;font-size:13px;}
+        th{text-align:left;padding:8px 10px;font-size:12px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--border);}
+        td{padding:10px;border-bottom:1px solid #eef0f3;}
+        .badge{background:#eef0f3;color:var(--accent);padding:2px 8px;border-radius:3px;font-size:11px;font-weight:700;}
+        .msg{padding:10px 14px;border-radius:4px;font-size:13px;margin-bottom:16px;display:none;}
+        .msg-ok{background:var(--success-bg);color:var(--success);border:1px solid #bfe4cc;}
+        .msg-error{background:var(--danger-bg);color:var(--danger);border:1px solid #f3c6c2;}
+        .card-movil{border:1px solid #eef0f3;border-radius:4px;padding:12px;margin-bottom:8px;}
+        @media (min-width:640px){ .card-movil-wrap{display:none;} }
+        @media (max-width:639px){ .tabla-wrap{display:none;} }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="nav-inner">
+            <div>
+                <p class="nav-title">Administración</p>
+                <p class="nav-sub" id="adminNombre">Administrador</p>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <a href="index.html" class="btn">Dashboard</a>
+                <button id="btnSalir" class="btn btn-danger">Cerrar sesión</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="msg msg-ok" id="mensajeBox"></div>
+        <div class="msg msg-error" id="errorBox"></div>
+
+        <div class="grid">
+            <div class="panel">
+                <h2>Agregar usuario</h2>
+                <form id="formAgregar">
+                    <div class="field">
+                        <label for="nombre">Nombre</label>
+                        <input type="text" id="nombre" required placeholder="Nombre completo" />
+                    </div>
+                    <div class="field">
+                        <label for="email">Correo electrónico</label>
+                        <input type="email" id="email" required placeholder="correo@ejemplo.com" />
+                    </div>
+                    <div class="field">
+                        <label for="usuario">Usuario</label>
+                        <input type="text" id="usuario" required placeholder="nombredeusuario" />
+                    </div>
+                    <div class="field">
+                        <label for="contrasena">Contraseña</label>
+                        <input type="password" id="contrasena" required placeholder="••••••••" />
+                        <p class="hint">Mínimo 6 caracteres</p>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Crear usuario</button>
+                </form>
+            </div>
+
+            <div class="panel">
+                <h2>Usuarios (<span id="totalUsuarios">0</span>)</h2>
+
+                <div class="card-movil-wrap" id="listaMovil"></div>
+
+                <div class="tabla-wrap" style="overflow-x:auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nombre</th>
+                                <th>Usuario</th>
+                                <th>Correo</th>
+                                <th style="text-align:center;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaUsuarios"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let usuarios = [];
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function mostrarMensaje(texto) {
+            document.getElementById('errorBox').style.display = 'none';
+            const box = document.getElementById('mensajeBox');
+            box.textContent = texto;
+            box.style.display = 'block';
+        }
+
+        function mostrarError(texto) {
+            document.getElementById('mensajeBox').style.display = 'none';
+            const box = document.getElementById('errorBox');
+            box.textContent = texto;
+            box.style.display = 'block';
+        }
+
+        async function verificarSesion() {
+            const res = await fetch('/api/me');
+            if (!res.ok) { window.location.href = '/login.html'; return; }
+            const data = await res.json();
+            if (!data.isAdmin) { window.location.href = '/index.html'; return; }
+            document.getElementById('adminNombre').textContent = data.nombre;
+            cargarUsuarios();
+        }
+
+        async function cargarUsuarios() {
+            const res = await fetch('/api/usuarios');
+            const data = await res.json();
+            if (data.success) {
+                usuarios = data.usuarios;
+                render();
+            }
+        }
+
+        function render() {
+            document.getElementById('totalUsuarios').textContent = usuarios.length;
+
+            const listaMovil = document.getElementById('listaMovil');
+            const tabla = document.getElementById('tablaUsuarios');
+            listaMovil.innerHTML = '';
+            tabla.innerHTML = '';
+
+            usuarios.forEach(u => {
+                const esAdmin = u.id === 1;
+
+                const cardDiv = document.createElement('div');
+                cardDiv.className = 'card-movil';
+                cardDiv.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div>
+                            <p style="font-weight:700;font-size:13px;margin:0;">${escapeHtml(u.nombre)}</p>
+                            <p style="color:var(--muted);font-size:12px;margin:2px 0 0 0;">@${escapeHtml(u.usuario)}</p>
+                            <p style="color:var(--muted);font-size:11px;margin:2px 0 0 0;">${escapeHtml(u.email)}</p>
+                        </div>
+                        ${esAdmin
+                            ? '<span class="badge">ADMIN</span>'
+                            : `<button class="btn btn-danger btn-eliminar" style="padding:5px 10px;font-size:12px;" data-id="${u.id}" data-nombre="${escapeHtml(u.nombre)}">Eliminar</button>`
+                        }
+                    </div>
+                `;
+                listaMovil.appendChild(cardDiv);
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${esAdmin ? '<span class="badge">ADMIN</span>' : u.id}</td>
+                    <td>${escapeHtml(u.nombre)}</td>
+                    <td style="color:var(--muted);">@${escapeHtml(u.usuario)}</td>
+                    <td style="color:var(--muted);font-size:12px;">${escapeHtml(u.email)}</td>
+                    <td style="text-align:center;">
+                        ${esAdmin
+                            ? '<span style="color:var(--muted);font-size:12px;">No editable</span>'
+                            : `<button class="btn btn-danger btn-eliminar" style="padding:5px 10px;font-size:12px;" data-id="${u.id}" data-nombre="${escapeHtml(u.nombre)}">Eliminar</button>`
+                        }
+                    </td>
+                `;
+                tabla.appendChild(tr);
+            });
+
+            document.querySelectorAll('.btn-eliminar').forEach(btn => {
+                btn.addEventListener('click', () => eliminarUsuario(btn.dataset.id, btn.dataset.nombre));
+            });
+        }
+
+        async function eliminarUsuario(id, nombre) {
+            if (!confirm(`¿Eliminar a ${nombre}?`)) return;
+            const res = await fetch(`/api/usuarios/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                mostrarMensaje(data.message);
+                cargarUsuarios();
+            } else {
+                mostrarError(data.error);
+            }
+        }
+
+        document.getElementById('formAgregar').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                nombre: document.getElementById('nombre').value.trim(),
+                email: document.getElementById('email').value.trim(),
+                usuario: document.getElementById('usuario').value.trim(),
+                contrasena: document.getElementById('contrasena').value
+            };
+            const res = await fetch('/api/usuarios', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                mostrarMensaje(data.message);
+                document.getElementById('formAgregar').reset();
+                cargarUsuarios();
+            } else {
+                mostrarError(data.error);
+            }
+        });
+
+        document.getElementById('btnSalir').addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/login.html';
+        });
+
+        verificarSesion();
+    </script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <title>Iniciar sesión — Gastos Diarios</title>
+    <style>
+        :root{
+            --bg:#f5f6f8;
+            --panel:#ffffff;
+            --border:#dfe2e7;
+            --text:#1f2430;
+            --muted:#6b7280;
+            --accent:#2f4a68;
+            --accent-hover:#25394f;
+            --danger:#b3261e;
+            --danger-bg:#fdecea;
+        }
+        *{box-sizing:border-box;}
+        body{
+            margin:0;
+            min-height:100vh;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:var(--bg);
+            color:var(--text);
+            font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,sans-serif;
+            padding:24px;
+        }
+        input{font-size:16px !important;}
+        .card{
+            width:100%;
+            max-width:380px;
+            background:var(--panel);
+            border:1px solid var(--border);
+            border-radius:6px;
+            padding:40px 32px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.05);
+        }
+        .logo{
+            width:64px;
+            height:64px;
+            object-fit:contain;
+            display:block;
+            margin:0 auto 16px auto;
+        }
+        h1{
+            font-size:20px;
+            font-weight:600;
+            text-align:center;
+            margin:0 0 4px 0;
+            letter-spacing:0.2px;
+        }
+        .subtitle{
+            text-align:center;
+            color:var(--muted);
+            font-size:13px;
+            margin:0 0 28px 0;
+        }
+        label{
+            display:block;
+            font-size:13px;
+            font-weight:600;
+            color:var(--text);
+            margin-bottom:6px;
+        }
+        .field{margin-bottom:16px;}
+        input{
+            width:100%;
+            padding:10px 12px;
+            border:1px solid var(--border);
+            border-radius:4px;
+            background:#fff;
+            color:var(--text);
+        }
+        input:focus{
+            outline:none;
+            border-color:var(--accent);
+            box-shadow:0 0 0 3px rgba(47,74,104,0.12);
+        }
+        button{
+            width:100%;
+            padding:11px;
+            background:var(--accent);
+            color:#fff;
+            border:none;
+            border-radius:4px;
+            font-size:14px;
+            font-weight:600;
+            cursor:pointer;
+            margin-top:6px;
+        }
+        button:hover{background:var(--accent-hover);}
+        button:disabled{opacity:0.6;cursor:default;}
+        .error{
+            background:var(--danger-bg);
+            border:1px solid #f3c6c2;
+            color:var(--danger);
+            font-size:13px;
+            padding:10px 12px;
+            border-radius:4px;
+            margin-bottom:16px;
+            display:none;
+        }
+        .footer-note{
+            text-align:center;
+            color:var(--muted);
+            font-size:12px;
+            margin-top:24px;
+            padding-top:16px;
+            border-top:1px solid var(--border);
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <img src="img/logo_login.png" alt="Logo" class="logo" />
+        <h1>Gastos Diarios</h1>
+        <p class="subtitle">Sistema de control de gastos</p>
+
+        <div class="error" id="errorBox"><span id="errorText"></span></div>
+
+        <form id="loginForm">
+            <div class="field">
+                <label for="usuario">Usuario o correo electrónico</label>
+                <input type="text" id="usuario" name="usuario" required autocomplete="username" placeholder="Ingresa tu usuario" />
+            </div>
+            <div class="field">
+                <label for="contrasena">Contraseña</label>
+                <input type="password" id="contrasena" name="contrasena" required autocomplete="current-password" placeholder="Ingresa tu contraseña" />
+            </div>
+            <button type="submit" id="btnSubmit">Iniciar sesión</button>
+        </form>
+
+        <p class="footer-note">Contacta al administrador si no cuentas con acceso.</p>
+    </div>
+
+    <script>
+        fetch('/api/me').then(r => { if (r.ok) window.location.href = '/'; });
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('btnSubmit');
+            const errorBox = document.getElementById('errorBox');
+            const errorText = document.getElementById('errorText');
+            errorBox.style.display = 'none';
+            btn.disabled = true;
+            btn.textContent = 'Ingresando...';
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        usuario: document.getElementById('usuario').value.trim(),
+                        contrasena: document.getElementById('contrasena').value
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    errorText.textContent = data.error || 'No se pudo iniciar sesión';
+                    errorBox.style.display = 'block';
+                }
+            } catch (err) {
+                errorText.textContent = 'Error de conexión. Intenta de nuevo.';
+                errorBox.style.display = 'block';
+            }
+            btn.disabled = false;
+            btn.textContent = 'Iniciar sesión';
+        });
+    </script>
+</body>
+</html>
