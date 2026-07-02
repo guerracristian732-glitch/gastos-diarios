@@ -5,6 +5,8 @@ const bcrypt = require('bcryptjs');
 const { pool, init } = require('./db');
 const { setSessionCookie, clearSessionCookie, getSession } = require('./auth');
 
+const TRABAJOS = ['Compras pantalla Led', 'Compras Garavision'];
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
@@ -115,6 +117,7 @@ const server = http.createServer(async (req, res) => {
 
       const fechaInicio = url.searchParams.get('fecha_inicio');
       const fechaFin = url.searchParams.get('fecha_fin');
+      const trabajo = url.searchParams.get('trabajo');
 
       let query = `
         SELECT r.*,
@@ -131,6 +134,10 @@ const server = http.createServer(async (req, res) => {
         params.push(fechaFin);
         query += ` AND r.fecha <= $${params.length}`;
       }
+      if (trabajo && TRABAJOS.includes(trabajo)) {
+        params.push(trabajo);
+        query += ` AND r.trabajo = $${params.length}`;
+      }
       query += ' GROUP BY r.id ORDER BY r.fecha DESC, r.fecha_creacion DESC';
 
       const { rows } = await pool.query(query, params);
@@ -146,14 +153,15 @@ const server = http.createServer(async (req, res) => {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
 
       const body = await readBody(req);
-      const { nombre, fecha, items } = body;
+      const { nombre, fecha, items, trabajo } = body;
 
       if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
       if (!Array.isArray(items) || items.length === 0) return sendJSON(res, 400, { success: false, error: 'Agrega al menos un producto' });
+      if (!trabajo || !TRABAJOS.includes(trabajo)) return sendJSON(res, 400, { success: false, error: 'Selecciona a qué trabajo pertenece el reporte' });
 
       const { rows: nuevoReporte } = await pool.query(
-        `INSERT INTO reportes (usuario_id, nombre, fecha) VALUES ($1, $2, $3) RETURNING *`,
-        [usuarioActual.id, nombre.trim(), fecha || new Date().toISOString().slice(0,10)]
+        `INSERT INTO reportes (usuario_id, nombre, fecha, trabajo) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [usuarioActual.id, nombre.trim(), fecha || new Date().toISOString().slice(0,10), trabajo]
       );
       const reporteId = nuevoReporte[0].id;
 
@@ -178,12 +186,13 @@ const server = http.createServer(async (req, res) => {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
       const id = matchReporte[1];
       const body = await readBody(req);
-      const { nombre, fecha } = body;
+      const { nombre, fecha, trabajo } = body;
       if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
+      if (!trabajo || !TRABAJOS.includes(trabajo)) return sendJSON(res, 400, { success: false, error: 'Selecciona a qué trabajo pertenece el reporte' });
 
       const { rows } = await pool.query(
-        `UPDATE reportes SET nombre = $1, fecha = $2 WHERE id = $3 AND usuario_id = $4 RETURNING *`,
-        [nombre.trim(), fecha, id, usuarioActual.id]
+        `UPDATE reportes SET nombre = $1, fecha = $2, trabajo = $3 WHERE id = $4 AND usuario_id = $5 RETURNING *`,
+        [nombre.trim(), fecha, trabajo, id, usuarioActual.id]
       );
       if (rows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
 

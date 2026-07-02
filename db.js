@@ -46,6 +46,11 @@ async function init() {
     );
   `);
 
+  // Campo "trabajo": a cuál de los dos trabajos pertenece el reporte (permite llevar cuentas separadas)
+  await pool.query(`
+    ALTER TABLE reportes ADD COLUMN IF NOT EXISTS trabajo TEXT NOT NULL DEFAULT 'Compras pantalla Led';
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reporte_items (
       id SERIAL PRIMARY KEY,
