@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 const { pool, init } = require('./db');
 const { setSessionCookie, clearSessionCookie, getSession } = require('./auth');
 
-const TRABAJOS = ['Compras pantalla Led', 'Compras Garavision'];
+// Nota: ya no se restringe a una lista fija; el usuario puede escribir el nombre del trabajo que quiera.
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = {
@@ -134,7 +134,7 @@ const server = http.createServer(async (req, res) => {
         params.push(fechaFin);
         query += ` AND r.fecha <= $${params.length}`;
       }
-      if (trabajo && TRABAJOS.includes(trabajo)) {
+      if (trabajo && trabajo.trim()) {
         params.push(trabajo);
         query += ` AND r.trabajo = $${params.length}`;
       }
@@ -157,11 +157,11 @@ const server = http.createServer(async (req, res) => {
 
       if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
       if (!Array.isArray(items) || items.length === 0) return sendJSON(res, 400, { success: false, error: 'Agrega al menos un producto' });
-      if (!trabajo || !TRABAJOS.includes(trabajo)) return sendJSON(res, 400, { success: false, error: 'Selecciona a qué trabajo pertenece el reporte' });
+      if (!trabajo || !trabajo.trim()) return sendJSON(res, 400, { success: false, error: 'Escribe o selecciona a qué trabajo pertenece el reporte' });
 
       const { rows: nuevoReporte } = await pool.query(
         `INSERT INTO reportes (usuario_id, nombre, fecha, trabajo) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [usuarioActual.id, nombre.trim(), fecha || new Date().toISOString().slice(0,10), trabajo]
+        [usuarioActual.id, nombre.trim(), fecha || new Date().toISOString().slice(0,10), trabajo.trim()]
       );
       const reporteId = nuevoReporte[0].id;
 
@@ -188,11 +188,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const { nombre, fecha, trabajo } = body;
       if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
-      if (!trabajo || !TRABAJOS.includes(trabajo)) return sendJSON(res, 400, { success: false, error: 'Selecciona a qué trabajo pertenece el reporte' });
+      if (!trabajo || !trabajo.trim()) return sendJSON(res, 400, { success: false, error: 'Escribe o selecciona a qué trabajo pertenece el reporte' });
 
       const { rows } = await pool.query(
         `UPDATE reportes SET nombre = $1, fecha = $2, trabajo = $3 WHERE id = $4 AND usuario_id = $5 RETURNING *`,
-        [nombre.trim(), fecha, trabajo, id, usuarioActual.id]
+        [nombre.trim(), fecha, trabajo.trim(), id, usuarioActual.id]
       );
       if (rows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
 

@@ -26,7 +26,9 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        const TRABAJOS = ['Compras pantalla Led', 'Compras Garavision'];
+        // Sugerencias iniciales; el usuario puede escribir cualquier otro nombre de trabajo.
+        const TRABAJOS_SUGERIDOS = ['Compras pantalla Led', 'Compras Garavision'];
+        const OTRO = '__otro__';
 
         function GastosApp() {
             const hoy = new Date().toISOString().slice(0,10);
@@ -44,14 +46,16 @@
 
             const [nombreNuevo, setNombreNuevo]         = useState('');
             const [fechaNueva, setFechaNueva]           = useState(hoy);
-            const [trabajoNuevo, setTrabajoNuevo]       = useState(TRABAJOS[0]);
+            const [trabajoNuevo, setTrabajoNuevo]       = useState(TRABAJOS_SUGERIDOS[0]);
+            const [trabajoNuevoTexto, setTrabajoNuevoTexto] = useState('');
             const [itemsNuevos, setItemsNuevos]         = useState([{ id: Date.now(), producto: '', cantidad: '', precio: '' }]);
             const [guardando, setGuardando]             = useState(false);
 
             const [reporteAbierto, setReporteAbierto]   = useState(null);
             const [nombreEdicion, setNombreEdicion]     = useState('');
             const [fechaEdicion, setFechaEdicion]       = useState('');
-            const [trabajoEdicion, setTrabajoEdicion]   = useState(TRABAJOS[0]);
+            const [trabajoEdicion, setTrabajoEdicion]   = useState(TRABAJOS_SUGERIDOS[0]);
+            const [trabajoEdicionTexto, setTrabajoEdicionTexto] = useState('');
             const [itemEditandoId, setItemEditandoId]   = useState(null);
             const [itemEdicion, setItemEdicion]         = useState({ producto:'', cantidad:'', precio:'' });
             const [nuevoItemEnEdicion, setNuevoItemEnEdicion] = useState({ producto:'', cantidad:'', precio:'' });
@@ -100,6 +104,8 @@
                 if (!nombreNuevo.trim()) { alert('Escribe un nombre para el reporte'); return; }
                 const validos = itemsNuevos.filter(it => it.producto && it.cantidad && it.precio);
                 if (validos.length === 0) { alert('Agrega al menos un producto'); return; }
+                const trabajoFinal = trabajoNuevo === OTRO ? trabajoNuevoTexto.trim() : trabajoNuevo;
+                if (!trabajoFinal) { alert('Escribe el nombre del trabajo'); return; }
 
                 setGuardando(true);
                 try {
@@ -109,13 +115,14 @@
                         body: JSON.stringify({
                             nombre: nombreNuevo,
                             fecha: fechaNueva,
-                            trabajo: trabajoNuevo,
+                            trabajo: trabajoFinal,
                             items: validos.map(it => ({ producto: it.producto, cantidad: parseInt(it.cantidad), precio: parseFloat(it.precio) }))
                         })
                     });
                     setNombreNuevo('');
                     setFechaNueva(hoy);
-                    setTrabajoNuevo(TRABAJOS[0]);
+                    setTrabajoNuevo(TRABAJOS_SUGERIDOS[0]);
+                    setTrabajoNuevoTexto('');
                     setItemsNuevos([{ id: Date.now(), producto: '', cantidad: '', precio: '' }]);
                     cargarReportes(filtroFechaInicio, filtroFechaFin, filtroTrabajo);
                     setVistaMovil('reportes');
@@ -146,6 +153,7 @@
                 setNombreEdicion(r.nombre);
                 setFechaEdicion(r.fecha.slice(0,10));
                 setTrabajoEdicion(r.trabajo);
+                setTrabajoEdicionTexto('');
                 setItemEditandoId(null);
                 setNuevoItemEnEdicion({ producto:'', cantidad:'', precio:'' });
             };
@@ -153,10 +161,12 @@
 
             const guardarEncabezado = async (id) => {
                 if (!nombreEdicion.trim()) { alert('El nombre no puede estar vacío'); return; }
+                const trabajoFinal = trabajoEdicion === OTRO ? trabajoEdicionTexto.trim() : trabajoEdicion;
+                if (!trabajoFinal) { alert('Escribe el nombre del trabajo'); return; }
                 const res = await fetch(`/api/reportes/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nombre: nombreEdicion, fecha: fechaEdicion, trabajo: trabajoEdicion })
+                    body: JSON.stringify({ nombre: nombreEdicion, fecha: fechaEdicion, trabajo: trabajoFinal })
                 });
                 const data = await res.json();
                 if (data.success) cargarReportes(filtroFechaInicio, filtroFechaFin, filtroTrabajo);
@@ -243,9 +253,10 @@
                 doc.text(`Generado: ${fecha}   |   Periodo: ${rango}   |   Reportes: ${reportes.length}`, 148, 25, { align: 'center' });
 
                 let startY = 32;
+                const trabajosPDF = Array.from(new Set(reportes.map(r => r.trabajo))).filter(Boolean);
 
                 // Una tabla y un total independiente por cada trabajo (los montos no se suman entre trabajos)
-                TRABAJOS.forEach(trabajo => {
+                trabajosPDF.forEach(trabajo => {
                     const reportesTrabajo = reportes.filter(r => r.trabajo === trabajo);
                     if (reportesTrabajo.length === 0) return;
 
@@ -284,7 +295,8 @@
             }
 
             const montoTotalFormulario = itemsNuevos.reduce((s, it) => s + ((parseInt(it.cantidad)||0) * (parseFloat(it.precio)||0)), 0);
-            const totalesPorTrabajo = TRABAJOS.map(trabajo => ({
+            const trabajosConDatos = Array.from(new Set([...TRABAJOS_SUGERIDOS, ...reportes.map(r => r.trabajo)])).filter(Boolean);
+            const totalesPorTrabajo = trabajosConDatos.map(trabajo => ({
                 trabajo,
                 total: reportes.filter(r => r.trabajo === trabajo).reduce((s, r) => s + r.total, 0),
                 cantidad: reportes.filter(r => r.trabajo === trabajo).length
@@ -387,8 +399,12 @@
                                 <div style={{marginBottom:16}}>
                                     <label style={S.label}>Trabajo</label>
                                     <select value={trabajoNuevo} onChange={e => setTrabajoNuevo(e.target.value)} style={S.input}>
-                                        {TRABAJOS.map(t => <option key={t} value={t}>{t}</option>)}
+                                        {trabajosConDatos.map(t => <option key={t} value={t}>{t}</option>)}
+                                        <option value={OTRO}>Otro (escribir)</option>
                                     </select>
+                                    {trabajoNuevo === OTRO && (
+                                        <input type="text" value={trabajoNuevoTexto} onChange={e => setTrabajoNuevoTexto(e.target.value)} style={{...S.input, marginTop:8}} placeholder="Escribe el nombre del trabajo" />
+                                    )}
                                 </div>
 
                                 <p style={{fontSize:12, fontWeight:700, color:'#374151', margin:'0 0 8px 0'}}>Productos del reporte</p>
@@ -478,7 +494,7 @@
                                     <label style={S.label}>Trabajo</label>
                                     <select value={filtroTrabajo} onChange={(e) => setFiltroTrabajo(e.target.value)} style={S.input}>
                                         <option value="">Todos los trabajos</option>
-                                        {TRABAJOS.map(t => <option key={t} value={t}>{t}</option>)}
+                                        {trabajosConDatos.map(t => <option key={t} value={t}>{t}</option>)}
                                     </select>
                                 </div>
                                 <div style={{display:'flex', gap:8, marginTop:10, flexWrap:'wrap'}}>
@@ -535,8 +551,12 @@
                                                 <div style={{marginBottom:16}}>
                                                     <label style={S.label}>Trabajo</label>
                                                     <select value={trabajoEdicion} onChange={e => setTrabajoEdicion(e.target.value)} style={S.input}>
-                                                        {TRABAJOS.map(t => <option key={t} value={t}>{t}</option>)}
+                                                        {trabajosConDatos.map(t => <option key={t} value={t}>{t}</option>)}
+                                                        <option value={OTRO}>Otro (escribir)</option>
                                                     </select>
+                                                    {trabajoEdicion === OTRO && (
+                                                        <input type="text" value={trabajoEdicionTexto} onChange={e => setTrabajoEdicionTexto(e.target.value)} style={{...S.input, marginTop:8}} placeholder="Escribe el nombre del trabajo" />
+                                                    )}
                                                 </div>
 
                                                 <p style={{fontSize:12, fontWeight:700, color:'#374151', margin:'0 0 8px 0'}}>Productos</p>
