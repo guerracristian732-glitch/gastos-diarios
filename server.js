@@ -57,6 +57,14 @@ async function usuarioDesdeSesion(req) {
   return rows[0] || null;
 }
 
+async function obtenerReporteCompleto(id) {
+  const { rows: reporteRows } = await pool.query('SELECT * FROM reportes WHERE id = $1', [id]);
+  if (reporteRows.length === 0) return null;
+  const { rows: items } = await pool.query('SELECT * FROM reporte_items WHERE reporte_id = $1 ORDER BY id ASC', [id]);
+  const total = items.reduce((s, it) => s + parseFloat(it.monto), 0);
+  return { ...reporteRows[0], items, total };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -74,20 +82,12 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { success: false, error: 'Completa usuario y contraseña' });
       }
 
-      const { rows } = await pool.query(
-        'SELECT * FROM usuarios WHERE usuario = $1 OR email = $1',
-        [usuarioInput]
-      );
+      const { rows } = await pool.query('SELECT * FROM usuarios WHERE usuario = $1 OR email = $1', [usuarioInput]);
       const encontrado = rows[0];
-
-      if (!encontrado) {
-        return sendJSON(res, 401, { success: false, error: 'Usuario no encontrado' });
-      }
+      if (!encontrado) return sendJSON(res, 401, { success: false, error: 'Usuario no encontrado' });
 
       const valido = await bcrypt.compare(contrasenaInput, encontrado.contrasena);
-      if (!valido) {
-        return sendJSON(res, 401, { success: false, error: 'Contraseña incorrecta' });
-      }
+      if (!valido) return sendJSON(res, 401, { success: false, error: 'Contraseña incorrecta' });
 
       setSessionCookie(res, { id: encontrado.id });
       return sendJSON(res, 200, { success: true });
@@ -102,109 +102,169 @@ const server = http.createServer(async (req, res) => {
       const usuario = await usuarioDesdeSesion(req);
       if (!usuario) return sendJSON(res, 401, { success: false });
       return sendJSON(res, 200, {
-        success: true,
-        id: usuario.id,
-        nombre: usuario.nombre,
-        usuario: usuario.usuario,
-        isAdmin: usuario.id === 1
+        success: true, id: usuario.id, nombre: usuario.nombre, usuario: usuario.usuario, isAdmin: usuario.id === 1
       });
     }
 
-    // A partir de aquí, todas las rutas requieren sesión activa
     const usuarioActual = await usuarioDesdeSesion(req);
 
-    // ---------- REPORTES ----------
+    // ---------- REPORTES (contenedor con nombre + fecha, formado por varios items) ----------
 
     if (pathname === '/api/reportes' && method === 'GET') {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
 
-      const usuarioIdFiltro = url.searchParams.get('usuario_id');
       const fechaInicio = url.searchParams.get('fecha_inicio');
       const fechaFin = url.searchParams.get('fecha_fin');
 
-      let query = 'SELECT * FROM reportes WHERE 1=1';
-      const params = [];
+      let query = `
+        SELECT r.*,
+          COALESCE(json_agg(i.* ORDER BY i.id) FILTER (WHERE i.id IS NOT NULL), '[]') AS items
+        FROM reportes r
+        LEFT JOIN reporte_items i ON i.reporte_id = r.id
+        WHERE r.usuario_id = $1
+      `;
+      const params = [usuarioActual.id];
 
-      if (usuarioIdFiltro) {
-        params.push(Number(usuarioIdFiltro));
-        query += ` AND usuario_id = $${params.length}`;
-      }
       if (fechaInicio && fechaFin) {
-        params.push(`${fechaInicio} 00:00:00`);
-        query += ` AND fecha_creacion >= $${params.length}`;
-        params.push(`${fechaFin} 23:59:59`);
-        query += ` AND fecha_creacion <= $${params.length}`;
+        params.push(fechaInicio);
+        query += ` AND r.fecha >= $${params.length}`;
+        params.push(fechaFin);
+        query += ` AND r.fecha <= $${params.length}`;
       }
-      query += ' ORDER BY fecha_creacion DESC';
+      query += ' GROUP BY r.id ORDER BY r.fecha DESC, r.fecha_creacion DESC';
 
       const { rows } = await pool.query(query, params);
-      return sendJSON(res, 200, { success: true, reportes: rows });
+      const reportes = rows.map(r => ({
+        ...r,
+        total: r.items.reduce((s, it) => s + parseFloat(it.monto), 0)
+      }));
+      return sendJSON(res, 200, { success: true, reportes });
     }
 
+    // Crear un reporte nuevo con uno o varios productos (items) de una vez
     if (pathname === '/api/reportes' && method === 'POST') {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
 
       const body = await readBody(req);
-      const { nombre_reporte, producto, cantidad, precio, fecha } = body;
+      const { nombre, fecha, items } = body;
 
-      if (!producto || cantidad === undefined || precio === undefined) {
-        return sendJSON(res, 400, { success: false, error: 'Datos incompletos' });
+      if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
+      if (!Array.isArray(items) || items.length === 0) return sendJSON(res, 400, { success: false, error: 'Agrega al menos un producto' });
+
+      const { rows: nuevoReporte } = await pool.query(
+        `INSERT INTO reportes (usuario_id, nombre, fecha) VALUES ($1, $2, $3) RETURNING *`,
+        [usuarioActual.id, nombre.trim(), fecha || new Date().toISOString().slice(0,10)]
+      );
+      const reporteId = nuevoReporte[0].id;
+
+      for (const item of items) {
+        if (!item.producto || item.cantidad === undefined || item.precio === undefined) continue;
+        const cant = Number(item.cantidad);
+        const prec = Number(item.precio);
+        await pool.query(
+          `INSERT INTO reporte_items (reporte_id, producto, cantidad, precio, monto) VALUES ($1, $2, $3, $4, $5)`,
+          [reporteId, item.producto.trim(), cant, prec, cant * prec]
+        );
       }
 
-      const cant = Number(cantidad);
-      const prec = Number(precio);
-      const monto = cant * prec;
-      const fechaCreacion = fecha ? `${fecha} 00:00:00` : new Date();
-
-      const { rows } = await pool.query(
-        `INSERT INTO reportes (usuario_id, nombre_reporte, producto, cantidad, precio, monto, fecha_creacion)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [usuarioActual.id, (nombre_reporte || '').trim(), producto.trim(), cant, prec, monto, fechaCreacion]
-      );
-
-      return sendJSON(res, 201, { success: true, message: 'Reporte creado', id: rows[0].id, monto });
+      const reporteCompleto = await obtenerReporteCompleto(reporteId);
+      return sendJSON(res, 201, { success: true, reporte: reporteCompleto });
     }
 
     const matchReporte = pathname.match(/^\/api\/reportes\/(\d+)$/);
 
+    // Actualizar el nombre/fecha del reporte (encabezado)
     if (matchReporte && method === 'PUT') {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
-
       const id = matchReporte[1];
       const body = await readBody(req);
-      const { nombre_reporte, producto, cantidad, precio, fecha } = body;
+      const { nombre, fecha } = body;
+      if (!nombre || !nombre.trim()) return sendJSON(res, 400, { success: false, error: 'El nombre del reporte es obligatorio' });
 
-      if (!producto || cantidad === undefined || precio === undefined) {
-        return sendJSON(res, 400, { success: false, error: 'Datos incompletos' });
-      }
-
-      const cant = Number(cantidad);
-      const prec = Number(precio);
-      const monto = cant * prec;
-
-      let query = `UPDATE reportes SET nombre_reporte = $1, producto = $2, cantidad = $3, precio = $4, monto = $5`;
-      const params = [(nombre_reporte || '').trim(), producto.trim(), cant, prec, monto];
-
-      if (fecha) {
-        params.push(`${fecha} 00:00:00`);
-        query += `, fecha_creacion = $${params.length}`;
-      }
-
-      params.push(id);
-      query += ` WHERE id = $${params.length} RETURNING *`;
-
-      const { rows } = await pool.query(query, params);
+      const { rows } = await pool.query(
+        `UPDATE reportes SET nombre = $1, fecha = $2 WHERE id = $3 AND usuario_id = $4 RETURNING *`,
+        [nombre.trim(), fecha, id, usuarioActual.id]
+      );
       if (rows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
-      return sendJSON(res, 200, { success: true, message: 'Reporte actualizado' });
+
+      const reporteCompleto = await obtenerReporteCompleto(id);
+      return sendJSON(res, 200, { success: true, reporte: reporteCompleto });
     }
 
     if (matchReporte && method === 'DELETE') {
       if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
-
-      const id = matchReporte[1];
-      const { rowCount } = await pool.query('DELETE FROM reportes WHERE id = $1', [id]);
+      const { rowCount } = await pool.query('DELETE FROM reportes WHERE id = $1 AND usuario_id = $2', [matchReporte[1], usuarioActual.id]);
       if (rowCount === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
       return sendJSON(res, 200, { success: true, message: 'Reporte eliminado' });
+    }
+
+    // ---------- ITEMS (productos dentro de un reporte) ----------
+
+    // Agregar un producto nuevo a un reporte ya existente (esto habilita "agregar más" al editar)
+    const matchItems = pathname.match(/^\/api\/reportes\/(\d+)\/items$/);
+    if (matchItems && method === 'POST') {
+      if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
+      const reporteId = matchItems[1];
+
+      const { rows: reporteRows } = await pool.query('SELECT id FROM reportes WHERE id = $1 AND usuario_id = $2', [reporteId, usuarioActual.id]);
+      if (reporteRows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
+
+      const body = await readBody(req);
+      const { producto, cantidad, precio } = body;
+      if (!producto || cantidad === undefined || precio === undefined) {
+        return sendJSON(res, 400, { success: false, error: 'Datos incompletos' });
+      }
+      const cant = Number(cantidad);
+      const prec = Number(precio);
+
+      await pool.query(
+        `INSERT INTO reporte_items (reporte_id, producto, cantidad, precio, monto) VALUES ($1, $2, $3, $4, $5)`,
+        [reporteId, producto.trim(), cant, prec, cant * prec]
+      );
+
+      const reporteCompleto = await obtenerReporteCompleto(reporteId);
+      return sendJSON(res, 201, { success: true, reporte: reporteCompleto });
+    }
+
+    // Actualizar o eliminar un producto específico dentro de un reporte
+    const matchItem = pathname.match(/^\/api\/reportes\/(\d+)\/items\/(\d+)$/);
+    if (matchItem && method === 'PUT') {
+      if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
+      const [, reporteId, itemId] = matchItem;
+
+      const { rows: reporteRows } = await pool.query('SELECT id FROM reportes WHERE id = $1 AND usuario_id = $2', [reporteId, usuarioActual.id]);
+      if (reporteRows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
+
+      const body = await readBody(req);
+      const { producto, cantidad, precio } = body;
+      if (!producto || cantidad === undefined || precio === undefined) {
+        return sendJSON(res, 400, { success: false, error: 'Datos incompletos' });
+      }
+      const cant = Number(cantidad);
+      const prec = Number(precio);
+
+      const { rowCount } = await pool.query(
+        `UPDATE reporte_items SET producto = $1, cantidad = $2, precio = $3, monto = $4 WHERE id = $5 AND reporte_id = $6`,
+        [producto.trim(), cant, prec, cant * prec, itemId, reporteId]
+      );
+      if (rowCount === 0) return sendJSON(res, 404, { success: false, error: 'Producto no encontrado' });
+
+      const reporteCompleto = await obtenerReporteCompleto(reporteId);
+      return sendJSON(res, 200, { success: true, reporte: reporteCompleto });
+    }
+
+    if (matchItem && method === 'DELETE') {
+      if (!usuarioActual) return sendJSON(res, 401, { success: false, error: 'No autorizado' });
+      const [, reporteId, itemId] = matchItem;
+
+      const { rows: reporteRows } = await pool.query('SELECT id FROM reportes WHERE id = $1 AND usuario_id = $2', [reporteId, usuarioActual.id]);
+      if (reporteRows.length === 0) return sendJSON(res, 404, { success: false, error: 'Reporte no encontrado' });
+
+      const { rowCount } = await pool.query('DELETE FROM reporte_items WHERE id = $1 AND reporte_id = $2', [itemId, reporteId]);
+      if (rowCount === 0) return sendJSON(res, 404, { success: false, error: 'Producto no encontrado' });
+
+      const reporteCompleto = await obtenerReporteCompleto(reporteId);
+      return sendJSON(res, 200, { success: true, reporte: reporteCompleto });
     }
 
     // ---------- ADMINISTRACIÓN DE USUARIOS (solo id=1) ----------
@@ -227,39 +287,24 @@ const server = http.createServer(async (req, res) => {
       if (!nombre || !email || !usuario || !contrasena) {
         return sendJSON(res, 400, { success: false, error: 'Completa todos los campos' });
       }
-      if (usuario.length < 3) {
-        return sendJSON(res, 400, { success: false, error: 'El usuario debe tener al menos 3 caracteres' });
-      }
-      if (contrasena.length < 6) {
-        return sendJSON(res, 400, { success: false, error: 'La contraseña debe tener al menos 6 caracteres' });
-      }
+      if (usuario.length < 3) return sendJSON(res, 400, { success: false, error: 'El usuario debe tener al menos 3 caracteres' });
+      if (contrasena.length < 6) return sendJSON(res, 400, { success: false, error: 'La contraseña debe tener al menos 6 caracteres' });
       const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      if (!emailValido) {
-        return sendJSON(res, 400, { success: false, error: 'Email no válido' });
-      }
+      if (!emailValido) return sendJSON(res, 400, { success: false, error: 'Email no válido' });
 
       const existe = await pool.query('SELECT id FROM usuarios WHERE usuario = $1 OR email = $2', [usuario, email]);
-      if (existe.rows.length > 0) {
-        return sendJSON(res, 400, { success: false, error: 'El usuario o email ya existe' });
-      }
+      if (existe.rows.length > 0) return sendJSON(res, 400, { success: false, error: 'El usuario o email ya existe' });
 
       const hash = await bcrypt.hash(contrasena, 10);
-      await pool.query(
-        `INSERT INTO usuarios (nombre, email, usuario, contrasena) VALUES ($1, $2, $3, $4)`,
-        [nombre, email, usuario, hash]
-      );
-
+      await pool.query(`INSERT INTO usuarios (nombre, email, usuario, contrasena) VALUES ($1, $2, $3, $4)`, [nombre, email, usuario, hash]);
       return sendJSON(res, 201, { success: true, message: 'Usuario creado exitosamente' });
     }
 
     const matchUsuario = pathname.match(/^\/api\/usuarios\/(\d+)$/);
     if (matchUsuario && method === 'DELETE') {
       if (!usuarioActual || usuarioActual.id !== 1) return sendJSON(res, 403, { success: false, error: 'No autorizado' });
-
       const id = Number(matchUsuario[1]);
-      if (id === 1) {
-        return sendJSON(res, 400, { success: false, error: 'No puedes eliminar al admin' });
-      }
+      if (id === 1) return sendJSON(res, 400, { success: false, error: 'No puedes eliminar al admin' });
       await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
       return sendJSON(res, 200, { success: true, message: 'Usuario eliminado exitosamente' });
     }
